@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Monitoring ABK & Tantrum - Realtime</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f9f9f9;
+      padding: 20px;
+      max-width: 960px;
+      margin: auto;
+    }
+
+    h1 {
+      color: #4a6fa5;
+      text-align: center;
+    }
+
+    .chart-container {
+      margin-top: 30px;
+      background: #fff;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+    }
+
+    .status {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 8px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .normal {
+      background-color: #d4edda;
+      color: #155724;
+    }
+
+    .warning {
+      background-color: #fff3cd;
+      color: #856404;
+    }
+
+    .alert {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+
+    canvas {
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <h1>Sistem Monitoring ABK & Tantrum</h1>
+
+  <div class="chart-container">
+    <h3>Volume Suara</h3>
+    <canvas id="soundChart"></canvas>
+  </div>
+
+  <div class="chart-container">
+    <h3>Detak Jantung (BPM)</h3>
+    <canvas id="bpmChart"></canvas>
+  </div>
+
+  <div class="status normal" id="status">
+    Menunggu data dari ESP32...
+  </div>
+
+  <script>
+    const broker = "wss://broker.hivemq.com:8884/mqtt";
+    const topic = "sensor/anak/monitoring";
+
+    const MAX_POINTS = 20;
+    const statusEl = document.getElementById("status");
+
+    const soundChart = new Chart(document.getElementById("soundChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [{
+          label: "Volume Suara",
+          data: [],
+          borderColor: "#4a6fa5",
+          backgroundColor: "rgba(74,111,165,0.1)",
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true }
+        }
+      }
+    });
+
+    const bpmChart = new Chart(document.getElementById("bpmChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [{
+          label: "Detak Jantung (BPM)",
+          data: [],
+          borderColor: "#ff7477",
+          backgroundColor: "rgba(255,116,119,0.1)",
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true }
+        }
+      }
+    });
+
+    function updateCharts(volume, bpm) {
+      const time = new Date().toLocaleTimeString();
+
+      soundChart.data.labels.push(time);
+      soundChart.data.datasets[0].data.push(volume);
+      if (soundChart.data.labels.length > MAX_POINTS) {
+        soundChart.data.labels.shift();
+        soundChart.data.datasets[0].data.shift();
+      }
+      soundChart.update();
+
+      bpmChart.data.labels.push(time);
+      bpmChart.data.datasets[0].data.push(bpm);
+      if (bpmChart.data.labels.length > MAX_POINTS) {
+        bpmChart.data.labels.shift();
+        bpmChart.data.datasets[0].data.shift();
+      }
+      bpmChart.update();
+    }
+
+    function updateStatus(volume, bpm) {
+      if (volume > 80 && bpm > 110) {
+        statusEl.textContent = "ALERT: Potensi tantrum terdeteksi!";
+        statusEl.className = "status alert";
+      } else if (volume > 80) {
+        statusEl.textContent = "WARNING: Suara keras terdeteksi.";
+        statusEl.className = "status warning";
+      } else if (bpm > 110) {
+        statusEl.textContent = "WARNING: Detak jantung tinggi.";
+        statusEl.className = "status warning";
+      } else if (volume < 30 && bpm < 80) {
+        statusEl.textContent = "Status: Kondisi tenang.";
+        statusEl.className = "status normal";
+      } else {
+        statusEl.textContent = "Status: Parameter normal.";
+        statusEl.className = "status normal";
+      }
+    }
+
+    // MQTT Client Setup
+    const client = mqtt.connect(broker);
+
+    client.on("connect", function () {
+      console.log("MQTT Connected");
+      client.subscribe(topic, function (err) {
+        if (err) console.error("Gagal subscribe ke MQTT:", err);
+      });
+    });
+
+    client.on("message", function (topic, message) {
+      try {
+        const data = JSON.parse(message.toString());
+        const volume = data.suara || 0;
+        const bpm = data.detak || 0;
+
+        updateCharts(volume, bpm);
+        updateStatus(volume, bpm);
+      } catch (e) {
+        console.error("Gagal parsing data MQTT:", e);
+      }
+    });
+
+    client.on("error", function (err) {
+      console.error("MQTT Error:", err);
+    });
+
+    client.on("close", function () {
+      console.warn("MQTT Disconnected");
+    });
+  </script>
+</body>
+</html>
